@@ -211,7 +211,7 @@ def softmax(X, theta = 1.0, axis = None):
 class STROKE_MASK:
     def __init__(self):
 
-        weights_dir = os.path.dirname(os.path.realpath(__file__)) + "\\weights\\"
+        weights_dir = os.path.dirname(os.path.realpath(__file__)) + "\\..\\weights\\"
         inputs, xception_inputs, ans = get_model()
         self.model = Model(inputs=[inputs, xception_inputs], outputs=[ans])
         self.model_weights = os.path.join(weights_dir,
