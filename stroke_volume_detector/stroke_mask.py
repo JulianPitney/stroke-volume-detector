@@ -12,6 +12,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 import tensorflow.keras.backend as K
 import copy
 import argparse
+from time import sleep
 
 
 LABEL_DICT = {'background': 0, 'normal': 1, 'stroke': 2}
@@ -121,11 +122,11 @@ def get_model(imageNet=False):
 
     return inputs, xception.input, output
 
-def readTif(tifPath, keepThreshold=100, imgShape=(608, 608), filterDark=True, returnOriginal=False):
+def readTif(tifPath, keepThreshold=100, imgShape=(608, 608), filterDark=False, returnOriginal=False):
     assert os.path.exists(tifPath)
     imgStack = io.imread(tifPath)
     (steps, height, width) = imgStack.shape
-    print("Image Stack Size:", imgStack.shape)
+
     processedStacks = []
     originalStacks = []
     for step in range(steps):
@@ -144,10 +145,12 @@ def readTif(tifPath, keepThreshold=100, imgShape=(608, 608), filterDark=True, re
             imgOrignal = np.asarray(imgOrignal, dtype='uint8')
             originalStacks.append(imgOrignal)
 
+    processedStacks = np.array(processedStacks)
+
     if returnOriginal:
         return processedStacks, originalStacks
     else:
-        return processedStacks
+        return processedStacks, imgStack.shape
 
 def predict2Mask(prediction):
     copyMask = np.zeros(shape=(prediction.shape[0], prediction.shape[1], 3), dtype='uint8')
@@ -226,7 +229,7 @@ class STROKE_MASK:
         """
         self.model.summary()
 
-    def predict(self, tif_stack_list, heatmap=False, color=False):
+    def predict(self, tif_stack_list, original_shape, color=False):
         """
         :param tif_stack_list: A list of numpy arrays, each array is a stack.
         :param heatmap: if true, Return the original predictions, has the same shape as input.
@@ -248,7 +251,8 @@ class STROKE_MASK:
         """
         imgShape = (608, 608)
         result = []
-        for tif_stack in tif_stack_list:
+        while(len(tif_stack_list)) > 0:
+            tif_stack = tif_stack_list.pop()
             assert len(tif_stack.shape) >= 3
             steps= tif_stack.shape[0]
             processedStack = []
@@ -263,27 +267,36 @@ class STROKE_MASK:
                     img3Channel = cv2.cvtColor(imgResize, cv2.COLOR_GRAY2RGB)
 
                 processedStack.append(img3Channel)
+            del tif_stack
             processedStack = np.asarray(processedStack, dtype=np.float32)
             x = [processedStack, processedStack]
             predictions = self.model.predict(x, batch_size=4, verbose=1)
+            del processedStack
+            del x
 
-            if heatmap:
-                result.append(softmax(predictions, axis=-1))
-            else:
-                tmp_result = []
-                for i in range(steps):
-                    if color:
-                        tmp_result.append(label2Color(predict2Mask(predictions[i])))
-                    else:
-                        tmp_result.append(predict2Mask(predictions[i]))
-                tmp_result = np.array(tmp_result)
-                result.append(tmp_result)
+            predictions = list(predictions)
+            resultPreAlloc = np.empty(original_shape, dtype=np.uint8)
+
+            for i in range(0, len(predictions)):
+                prediction = predictions.pop()
+                if color:
+                    temp = label2Color(predict2Mask(prediction))
+                else:
+                    temp = predict2Mask(prediction)
+
+                temp = cv2.resize(temp, (original_shape[2], original_shape[1]))
+                temp = np.asarray(temp, dtype=np.uint8, order='C')
+                resultPreAlloc[i] = temp[:, :, 0]
+                del prediction
+            del predictions
+
+            result.append(resultPreAlloc)
 
         return result
 
 def main():
 
-    parser = argparse.ArgumentParser(description='Parse a directory path pointing to some stitched lightsheet scans.')
+    parser = argparse.ArgumentParser(description='This tool takes a directory of tiff stacks as input. It will place each pixel into one of three categories; (0=Background, 1=Normal, 2=Stroke) It will store these results in an image mask of the same size and shape as the input stack.')
     parser.add_argument('--scans_dir', metavar='STITCHED_SCANS_DIR', dest='STITCHED_SCANS_DIR', action='store', required=True, help='Full path to directory where stitched lightsheet scans are. This directory should ONLY contain the stitched lightsheet scans.')
     args = vars(parser.parse_args())
 
@@ -305,12 +318,12 @@ def main():
 
     for scan in scans:
         print("Loading " + scan)
-        stack = [np.array(readTif(STITCHED_SCANS_DIR + "\\" + scan, imgShape=(1216, 1216)))]
-        result = S.predict(stack, color=True)
+        stack, original_shape = readTif(STITCHED_SCANS_DIR + "\\" + scan, imgShape=(608, 608))
+        print(original_shape)
+        result = S.predict([stack], original_shape, color=True)
+        print(result[0].shape)
         print("Saving " + STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_result.tif")
         io.imsave(STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_result.tif", result[0])
-
-
 
 
 if __name__ == '__main__':
