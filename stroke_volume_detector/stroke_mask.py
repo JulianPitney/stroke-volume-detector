@@ -254,7 +254,7 @@ class STROKE_MASK:
         while(len(tif_stack_list)) > 0:
             tif_stack = tif_stack_list.pop()
             assert len(tif_stack.shape) >= 3
-            steps= tif_stack.shape[0]
+            steps = tif_stack.shape[0]
             processedStack = []
             for step in range(steps):
                 img8 = cv2.normalize(tif_stack[step], None, 0, 255, cv2.NORM_MINMAX)
@@ -275,22 +275,18 @@ class STROKE_MASK:
             del x
 
             predictions = list(predictions)
-            resultPreAlloc = np.empty(original_shape, dtype=np.uint8)
+            slices = []
 
             for i in range(0, len(predictions)):
-                prediction = predictions.pop()
+                prediction = predictions[i]
                 if color:
                     temp = label2Color(predict2Mask(prediction))
                 else:
                     temp = predict2Mask(prediction)
+                slices.append(temp[:, :, 0])
+            slices = np.array(slices, dtype=np.uint8)
 
-                temp = cv2.resize(temp, (original_shape[2], original_shape[1]))
-                temp = np.asarray(temp, dtype=np.uint8, order='C')
-                resultPreAlloc[i] = temp[:, :, 0]
-                del prediction
-            del predictions
-
-            result.append(resultPreAlloc)
+            result.append(slices)
 
         return result
 
@@ -319,12 +315,11 @@ def main():
     for scan in scans:
         print("Loading " + scan)
         stack, original_shape = readTif(STITCHED_SCANS_DIR + "\\" + scan, imgShape=(608, 608))
-        print(original_shape)
         result = S.predict([stack], original_shape, color=True)
-        print(result[0].shape)
-        print("Saving " + STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_result.tif")
-        io.imsave(STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_result.tif", result[0])
-
+        del stack
+        print("Saving " + STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_stroke_mask.tif")
+        io.imsave(STITCHED_SCANS_DIR + "\\" + scan[:-4] + "_stroke_mask.tif", result[0])
+        del result
 
 if __name__ == '__main__':
     main()
